@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"execution-service/models"
+	"execution-service/utils"
+	"execution-service/validator"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
@@ -20,13 +22,17 @@ func ExecuteCode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := validator.ValidateRequest(req); err != nil {
+		HandleError(c, models.ErrBadRequest, err.Error())
+		return
+	}
 
-	fileName := fmt.Sprintf("code.%s", getFileExtension(req.Language))
+	fileName := fmt.Sprintf("code.%s", utils.GetFileExtension(req.Language))
 	filePath := fmt.Sprintf("/app/%s", fileName)
 
-	// Ghi code vào file trong container
 	cmdWrite := exec.Command("docker", "exec", "-i", "code-exec-container", "bash", "-c", fmt.Sprintf("cat > %s", filePath))
 	cmdWrite.Stdin = bytes.NewReader([]byte(req.Code))
+
 	if err := cmdWrite.Run(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write code"})
 		return
@@ -42,16 +48,20 @@ func ExecuteCode(c *gin.Context) {
 		var cmd *exec.Cmd
 		switch req.Language {
 		case "python":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "python3", filePath)
+			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("echo '%s' | python3 %s", testCase.Input, filePath))
+
 		case "c":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("gcc %s -o /app/code.out && /app/code.out", filePath))
+			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("gcc -std=c99 %s -o /app/code.out && echo '%s' | /app/code.out", filePath, testCase.Input))
+
 		case "cpp":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("g++ %s -o /app/code.out && /app/code.out", filePath))
+			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("g++ %s -o /app/code.out && echo '%s' | /app/code.out", filePath, testCase.Input))
+
 		case "java":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("javac %s && java -cp /app code", filePath))
+			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("javac %s && echo '%s' | java -cp /app Main", filePath, testCase.Input))
+
 		default:
 			cancel()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported language"})
+			HandleError(c, models.ErrUnsupportedLanguage)
 			return
 		}
 
@@ -64,56 +74,51 @@ func ExecuteCode(c *gin.Context) {
 		timeUsed := time.Since(start).Seconds()
 		totalTimeUsed += timeUsed
 
+		var output string
+		passed := false
+
 		if errors.Is(err, context.DeadlineExceeded) {
-			results = append(results, models.ExecuteResponse{
+			HandleError(c, models.ErrTimeout, models.ExecuteResponse{
 				TestCaseIndex: i,
-				Output:        "Timeout error",
+				Output:        output,
 				Expected:      testCase.Output,
 				TimeUsed:      timeUsed,
 				Passed:        false,
-			})
-			continue
-		}
-
-		if err != nil {
-			results = append(results, models.ExecuteResponse{
+			}, totalTimeUsed)
+			return
+		} else if err != nil {
+			HandleError(c, models.ErrExecutionFailed, models.ExecuteResponse{
 				TestCaseIndex: i,
-				Output:        "Execution failed",
+				Output:        output,
 				Expected:      testCase.Output,
 				TimeUsed:      timeUsed,
 				Passed:        false,
-			})
-			continue
+			}, totalTimeUsed)
+			return
 		}
 
-		actualOutput := out.String()
-		passed := actualOutput == testCase.Output
+		output = out.String()
+		normalizedOutput := normalizeOutput(output)
+		normalizedExpected := normalizeOutput(testCase.Output)
+		passed = normalizedOutput == normalizedExpected
+
 		results = append(results, models.ExecuteResponse{
 			TestCaseIndex: i,
-			Output:        actualOutput,
+			Output:        output,
 			Expected:      testCase.Output,
 			TimeUsed:      timeUsed,
 			Passed:        passed,
 		})
+
+		if !passed {
+			HandleError(c, models.ErrTestCaseFailed, results, totalTimeUsed)
+			return
+		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"totalTimeUsed": totalTimeUsed,
-		"results":       results,
-	})
-}
-
-func getFileExtension(language string) string {
-	switch language {
-	case "python":
-		return "py"
-	case "c":
-		return "c"
-	case "cpp":
-		return "cpp"
-	case "java":
-		return "java"
-	default:
-		return "txt"
+	response := models.ApiResponse{
+		TotalTimeUsed: totalTimeUsed,
+		Results:       results,
 	}
+	c.JSON(http.StatusOK, response)
 }
