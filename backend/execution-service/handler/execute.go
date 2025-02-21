@@ -34,7 +34,7 @@ func ExecuteCode(c *gin.Context) {
 	cmdWrite.Stdin = bytes.NewReader([]byte(req.Code))
 
 	if err := cmdWrite.Run(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write code"})
+		HandleError(c, models.ErrServerBusy, err.Error())
 		return
 	}
 
@@ -45,21 +45,8 @@ func ExecuteCode(c *gin.Context) {
 		start := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutPerTest)
 
-		var cmd *exec.Cmd
-		switch req.Language {
-		case "python":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("echo '%s' | python3 %s", testCase.Input, filePath))
-
-		case "c":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("gcc -std=c99 %s -o /app/code.out && echo '%s' | /app/code.out", filePath, testCase.Input))
-
-		case "cpp":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("g++ %s -o /app/code.out && echo '%s' | /app/code.out", filePath, testCase.Input))
-
-		case "java":
-			cmd = exec.CommandContext(ctx, "docker", "exec", "code-exec-container", "bash", "-c", fmt.Sprintf("javac %s && echo '%s' | java -cp /app Main", filePath, testCase.Input))
-
-		default:
+		cmd, errCmd := utils.GetExecutionCommand(ctx, req.Language, filePath, testCase.Input)
+		if errCmd != nil {
 			cancel()
 			HandleError(c, models.ErrUnsupportedLanguage)
 			return

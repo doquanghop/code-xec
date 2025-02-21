@@ -13,4 +13,5 @@ var (
 	ErrExecutionFailed     = CustomError{Code: http.StatusInternalServerError, Message: "Execution failed"}
 	ErrTimeout             = CustomError{Code: http.StatusGatewayTimeout, Message: "Execution timeout"}
 	ErrTestCaseFailed      = CustomError{Code: http.StatusInternalServerError, Message: "Test case failed"}
+	ErrServerBusy          = CustomError{Code: http.StatusServiceUnavailable, Message: "Server is busy, please try again later"}
 )
