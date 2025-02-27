@@ -38,8 +38,11 @@ func ExecuteCode(c *gin.Context) {
 		return
 	}
 
-	var results []models.ExecuteResponse
+	var failedResult *models.ExecuteResponse
 	var totalTimeUsed float64
+
+	totalTestCases := len(req.TestCases)
+	passedTestCases := 0
 
 	for i, testCase := range req.TestCases {
 		start := time.Now()
@@ -65,23 +68,23 @@ func ExecuteCode(c *gin.Context) {
 		passed := false
 
 		if errors.Is(err, context.DeadlineExceeded) {
-			HandleError(c, models.ErrTimeout, models.ExecuteResponse{
+			failedResult = &models.ExecuteResponse{
 				TestCaseIndex: i,
-				Output:        output,
+				Output:        "Timeout",
 				Expected:      testCase.Output,
 				TimeUsed:      timeUsed,
 				Passed:        false,
-			}, totalTimeUsed)
-			return
+			}
+			break
 		} else if err != nil {
-			HandleError(c, models.ErrExecutionFailed, models.ExecuteResponse{
+			failedResult = &models.ExecuteResponse{
 				TestCaseIndex: i,
-				Output:        output,
+				Output:        "Execution Error",
 				Expected:      testCase.Output,
 				TimeUsed:      timeUsed,
 				Passed:        false,
-			}, totalTimeUsed)
-			return
+			}
+			break
 		}
 
 		output = out.String()
@@ -89,23 +92,37 @@ func ExecuteCode(c *gin.Context) {
 		normalizedExpected := normalizeOutput(testCase.Output)
 		passed = normalizedOutput == normalizedExpected
 
-		results = append(results, models.ExecuteResponse{
-			TestCaseIndex: i,
-			Output:        output,
-			Expected:      testCase.Output,
-			TimeUsed:      timeUsed,
-			Passed:        passed,
-		})
-
 		if !passed {
-			HandleError(c, models.ErrTestCaseFailed, results, totalTimeUsed)
-			return
+			failedResult = &models.ExecuteResponse{
+				TestCaseIndex: i,
+				Output:        output,
+				Expected:      testCase.Output,
+				TimeUsed:      timeUsed,
+				Passed:        false,
+			}
+			break
+		} else {
+			passedTestCases++
 		}
 	}
 
-	response := models.ApiResponse{
-		TotalTimeUsed: totalTimeUsed,
-		Results:       results,
+	status := "Failed"
+	httpStatus := http.StatusUnprocessableEntity
+
+	if failedResult == nil {
+		status = "Passed"
+		httpStatus = http.StatusOK
 	}
-	c.JSON(http.StatusOK, response)
+
+	response := models.ApiResponse{
+		Status:          status,
+		Language:        req.Language,
+		TotalTimeUsed:   totalTimeUsed,
+		TotalMemoryUsed: 0,
+		TotalTestCases:  totalTestCases,
+		PassedTestCases: passedTestCases,
+		FailedResult:    failedResult,
+	}
+
+	c.JSON(httpStatus, response)
 }
