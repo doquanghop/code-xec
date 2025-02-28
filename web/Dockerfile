@@ -17,7 +17,7 @@ FROM node:20
 WORKDIR /app
 
 # Copy built files
-COPY --from=builder /app ./
+COPY --from=builder /internal/app ./
 
 # Expose the port Next.js runs on
 EXPOSE 3000

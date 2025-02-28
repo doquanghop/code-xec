@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/execution-service.iml" filepath="$PROJECT_DIR$/.idea/execution-service.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/code-xec.iml" filepath="$PROJECT_DIR$/.idea/code-xec.iml" />
     </modules>
   </component>
 </project>

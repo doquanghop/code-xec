@@ -21,7 +21,7 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 # 8️⃣ Copy binary từ builder sang image nhỏ gọn này
-COPY --from=builder /app/execution-service .
+COPY --from=builder /internal/app/execution-service .
 
 # 9️⃣ Mở cổng 8080 (hoặc cổng bạn đang dùng)
 EXPOSE 8080
